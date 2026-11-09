@@ -41,10 +41,11 @@ struct RS3StudioApp: App {
 
     init() {
         let gimbal = Demo.isOn ? GimbalController.rendering() : GimbalController()
+        let websocket = WebSocketController(gimbal: gimbal)
         _gimbal = StateObject(wrappedValue: gimbal)
         _presets = StateObject(wrappedValue: Demo.isOn ? PresetStore.rendering() : PresetStore())
-        _websocket = StateObject(wrappedValue: WebSocketController(gimbal: gimbal))
-        _osc = StateObject(wrappedValue: OSCController(gimbal: gimbal))
+        _websocket = StateObject(wrappedValue: websocket)
+        _osc = StateObject(wrappedValue: OSCController(gimbal: gimbal, websocket: websocket))
     }
 
     var body: some Scene {

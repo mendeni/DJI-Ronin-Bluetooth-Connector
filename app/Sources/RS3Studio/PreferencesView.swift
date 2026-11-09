@@ -19,18 +19,23 @@ struct PreferencesView: View {
                 GroupBox("WebSocket bridge") {
                     VStack(alignment: .leading, spacing: 14) {
                         Toggle("Enable WebSocket listener", isOn: $websocket.enabled)
+                        Toggle("Allow connections from remote hosts", isOn: $websocket.allowRemoteHosts)
+                        Text("Off by default: the listener accepts connections only from this Mac. Enable remote access only on a trusted network or VPN.")
+                            .font(.callout).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                         portField("Port", value: $websocket.port, placeholder: "81")
                         Toggle("Require access token", isOn: $websocket.requireAccessToken)
                         if websocket.requireAccessToken {
                             HStack(alignment: .top) {
                                 Text("Access token")
                                 Spacer()
-                                Text(websocket.token)
+                                Text(websocket.accessToken)
                                     .font(.system(.caption, design: .monospaced))
                                     .textSelection(.enabled)
                                     .frame(maxWidth: 310, alignment: .trailing)
+                                Button("Regenerate") { websocket.regenerateToken() }
                             }
-                            Text("Send auth:<token> as the first text message on each connection.")
+                            Text("Wait for the server's nonce frame, then reply with auth:<64-hex-character HMAC-SHA256 of the nonce using this token as the key>.")
                                 .font(.callout).foregroundStyle(.secondary)
                                 .fixedSize(horizontal: false, vertical: true)
                         } else {
@@ -51,11 +56,10 @@ struct PreferencesView: View {
                 GroupBox("OSC bridge") {
                     VStack(alignment: .leading, spacing: 14) {
                         Toggle("Enable OSC listener", isOn: $osc.enabled)
-                        if osc.enabled {
-                            Text("OSC has no authentication; use only on a trusted network.")
-                                .font(.callout).foregroundStyle(.orange)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
+                        Toggle("Allow connections from remote hosts", isOn: $osc.allowRemoteHosts)
+                        Text("Off by default: OSC is limited to this Mac. OSC has no authentication; use a trusted VPN or tunnel for remote control.")
+                            .font(.callout).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                         portField("UDP port", value: $osc.port, placeholder: "8000")
                         Toggle("Log OSC diagnostics", isOn: $osc.loggingEnabled)
                         Text("OSC diagnostics are written to ~/Library/Logs/RoninStudio-OSC.log.")

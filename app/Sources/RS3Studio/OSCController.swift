@@ -8,6 +8,7 @@ import SwiftUI
 final class OSCController: ObservableObject {
     @Published var enabled: Bool { didSet { persist(); if !isApplying { applySettings() } } }
     @Published var port: Int { didSet { persist(); if !isApplying { applySettings() } } }
+    @Published var allowRemoteHosts: Bool { didSet { persist(); if !isApplying { applySettings() } } }
     @Published var loggingEnabled: Bool {
         didSet {
             persist()
@@ -18,21 +19,26 @@ final class OSCController: ObservableObject {
     @Published private(set) var status = "Stopped"
 
     private let gimbal: GimbalController
+    private let websocket: WebSocketController
     private let defaults = UserDefaults.standard
     private let queue = DispatchQueue(label: "co.rs3studio.osc")
     private var listener: NWListener?
     private var listenerID: UUID?
+    private var connections: [ObjectIdentifier: NWConnection] = [:]
     private var isApplying = false
+    private let maximumConnections = 32
 
     private var diagnosticLogURL: URL {
         FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Logs/RoninStudio-OSC.log")
     }
 
-    init(gimbal: GimbalController) {
+    init(gimbal: GimbalController, websocket: WebSocketController) {
         self.gimbal = gimbal
+        self.websocket = websocket
         enabled = defaults.object(forKey: Keys.enabled) as? Bool ?? false
         port = defaults.object(forKey: Keys.port) as? Int ?? 8000
+        allowRemoteHosts = defaults.object(forKey: Keys.allowRemoteHosts) as? Bool ?? false
         loggingEnabled = defaults.object(forKey: Keys.loggingEnabled) as? Bool ?? false
     }
 
@@ -42,6 +48,7 @@ final class OSCController: ObservableObject {
             status = "Restarting listener…"
             oscLog("restart requested; waiting for current listener to cancel")
             listener.cancel()
+            stopConnections()
             return
         }
         startListener()
@@ -55,7 +62,11 @@ final class OSCController: ObservableObject {
             return
         }
         do {
-            let newListener = try NWListener(using: .udp, on: nwPort)
+            let parameters = NWParameters.udp
+            if !allowRemoteHosts {
+                parameters.requiredLocalEndpoint = .hostPort(host: .ipv4(.loopback), port: nwPort)
+            }
+            let newListener = try NWListener(using: parameters, on: nwPort)
             let id = UUID()
             listener = newListener
             listenerID = id
@@ -68,8 +79,8 @@ final class OSCController: ObservableObject {
                     switch state {
                     case .ready:
                         self.isListening = true
-                        self.status = "Listening on UDP port \(self.port)"
-                        self.oscLog("listener ready on UDP port \(self.port)")
+                        self.status = "Listening on UDP port \(self.port) (\(self.allowRemoteHosts ? "all interfaces" : "loopback"))"
+                        self.oscLog("listener ready on UDP port \(self.port), remote hosts \(self.allowRemoteHosts ? "allowed" : "blocked")")
                     case .failed(let error):
                         self.isListening = false
                         self.status = "Listener error: \(error.localizedDescription)"
@@ -104,30 +115,57 @@ final class OSCController: ObservableObject {
         } else {
             status = "Stopped"
         }
+        stopConnections()
         // The shared gimbal motion watchdog stops remote motion after 600 ms
         // without updates. Do not stop it immediately: WebSocket may be active.
     }
 
+    private func stopConnections() {
+        for connection in connections.values { connection.cancel() }
+        connections.removeAll()
+    }
+
     private func accept(_ connection: NWConnection) {
+        guard connections.count < maximumConnections else {
+            oscLog("rejected UDP endpoint: connection limit reached")
+            connection.cancel()
+            return
+        }
+        let id = ObjectIdentifier(connection)
+        connections[id] = connection
         connection.stateUpdateHandler = { [weak self] state in
-            if case .failed(let error) = state {
-                Task { @MainActor in self?.oscLog("UDP connection failed: \(error.localizedDescription)") }
+            switch state {
+            case .failed(let error):
+                Task { @MainActor in
+                    self?.oscLog("UDP connection failed: \(error.localizedDescription)")
+                    self?.remove(connection, id: id)
+                }
+            case .cancelled:
+                Task { @MainActor in self?.remove(connection, id: id) }
+            default: break
             }
         }
         connection.start(queue: queue)
-        receive(on: connection)
+        receive(on: connection, id: id)
     }
 
-    private func receive(on connection: NWConnection) {
+    private func remove(_ connection: NWConnection, id: ObjectIdentifier) {
+        connections.removeValue(forKey: id)
+        connection.cancel()
+    }
+
+    private func receive(on connection: NWConnection, id: ObjectIdentifier) {
         connection.receiveMessage { [weak self] data, _, _, error in
             Task { @MainActor in
                 guard let self else { connection.cancel(); return }
                 if let error {
                     self.oscLog("receive failed: \(error.localizedDescription)")
+                    self.remove(connection, id: id)
+                    return
                 } else if let data {
                     self.handlePacket(data)
                 }
-                self.receive(on: connection)
+                self.receive(on: connection, id: id)
             }
         }
     }
@@ -138,8 +176,8 @@ final class OSCController: ObservableObject {
             oscLog("rejected malformed or oversized OSC datagram (\(data.count) bytes)")
             return
         }
-        let limits = (pan: min(1, max(0, UserDefaults.standard.double(forKey: "rs3.websocket.panLimit"))),
-                      tilt: min(1, max(0, UserDefaults.standard.double(forKey: "rs3.websocket.tiltLimit"))))
+        let limits = (pan: min(1, max(0, websocket.panLimit)),
+                      tilt: min(1, max(0, websocket.tiltLimit)))
         let pan = command.pan ?? 0
         let tilt = command.tilt ?? 0
         let sent = gimbal.setRemotePanTilt(pan: pan, tilt: tilt,
@@ -154,6 +192,7 @@ final class OSCController: ObservableObject {
         guard !isApplying else { return }
         defaults.set(enabled, forKey: Keys.enabled)
         defaults.set(port, forKey: Keys.port)
+        defaults.set(allowRemoteHosts, forKey: Keys.allowRemoteHosts)
         defaults.set(loggingEnabled, forKey: Keys.loggingEnabled)
     }
 
@@ -223,6 +262,7 @@ final class OSCController: ObservableObject {
     private enum Keys {
         static let enabled = "rs3.osc.enabled"
         static let port = "rs3.osc.port"
+        static let allowRemoteHosts = "rs3.osc.allowRemoteHosts"
         static let loggingEnabled = "rs3.osc.loggingEnabled"
     }
 }
