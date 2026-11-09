@@ -97,8 +97,10 @@ final class WebSocketController: ObservableObject {
             let parameters = NWParameters.tcp
             let websocket = NWProtocolWebSocket.Options()
             websocket.autoReplyPing = true
-            websocket.setClientRequestHandler(queue) { request in
-                let hasOrigin = request.additionalHeaders.contains { $0.0.lowercased() == "origin" }
+            websocket.setClientRequestHandler(queue) { _, headers in
+                let hasOrigin = headers.contains { header in
+                    header.name.caseInsensitiveCompare("origin") == .orderedSame
+                }
                 return hasOrigin ? .init(status: .reject(status: .forbidden)) : .init(status: .accept)
             }
             parameters.defaultProtocolStack.applicationProtocols.insert(websocket, at: 0)
