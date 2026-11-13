@@ -39,14 +39,12 @@ struct RS3StudioApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     @StateObject private var gimbal: GimbalController
     @StateObject private var presets: PresetStore
-    @StateObject private var websocket: WebSocketController
     @StateObject private var osc: OSCController
 
     init() {
         let gimbal = Demo.isOn ? GimbalController.rendering() : GimbalController()
         _gimbal = StateObject(wrappedValue: gimbal)
         _presets = StateObject(wrappedValue: Demo.isOn ? PresetStore.rendering() : PresetStore())
-        _websocket = StateObject(wrappedValue: WebSocketController(gimbal: gimbal))
         _osc = StateObject(wrappedValue: OSCController(gimbal: gimbal))
     }
 
@@ -55,7 +53,6 @@ struct RS3StudioApp: App {
             RootView()
                 .environmentObject(gimbal)
                 .environmentObject(presets)
-                .environmentObject(websocket)
                 .environmentObject(osc)
                 .frame(minWidth: 700, minHeight: 480)
         }
@@ -90,7 +87,6 @@ enum Pane: String, CaseIterable, Identifiable {
 
 struct RootView: View {
     @EnvironmentObject private var gimbal: GimbalController
-    @EnvironmentObject private var websocket: WebSocketController
     @EnvironmentObject private var osc: OSCController
     @State private var pane: Pane = Demo.pane
 
@@ -104,14 +100,8 @@ struct RootView: View {
                     }
                 }
                 Section("Controllers") {
-                    if websocket.isListening {
-                        Text("WebSocket · port \(websocket.port)").font(.callout)
-                    }
                     if osc.isListening {
                         Text("OSC · UDP \(osc.port.formatted(.number.grouping(.never)))").font(.callout)
-                    }
-                    if !websocket.isListening && !osc.isListening {
-                        Text("None").foregroundStyle(.tertiary).font(.callout)
                     }
                 }
                 Section("Gimbals") { GimbalSidebarRow() }
@@ -128,11 +118,9 @@ struct RootView: View {
         }
         .onAppear {
             gimbal.connect()
-            websocket.applySettings()
             osc.applySettings()
         }
         .onDisappear {
-            websocket.stop()
             osc.stop()
         }
     }

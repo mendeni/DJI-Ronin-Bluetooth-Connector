@@ -8,6 +8,8 @@ import SwiftUI
 final class OSCController: ObservableObject {
     @Published var enabled: Bool { didSet { persist(); if !isApplying { applySettings() } } }
     @Published var port: Int { didSet { persist(); if !isApplying { applySettings() } } }
+    @Published var panLimit: Double { didSet { persist() } }
+    @Published var tiltLimit: Double { didSet { persist() } }
     @Published var allowRemoteHosts: Bool {
         didSet {
             persist();
@@ -40,6 +42,8 @@ final class OSCController: ObservableObject {
         self.gimbal = gimbal
         enabled = defaults.object(forKey: Keys.enabled) as? Bool ?? false
         port = defaults.object(forKey: Keys.port) as? Int ?? 8000
+        panLimit = defaults.object(forKey: Keys.panLimit) as? Double ?? 0.5
+        tiltLimit = defaults.object(forKey: Keys.tiltLimit) as? Double ?? 0.5
         allowRemoteHosts = defaults.object(forKey: Keys.allowRemoteHosts) as? Bool ?? false
         loggingEnabled = defaults.object(forKey: Keys.loggingEnabled) as? Bool ?? false
     }
@@ -165,8 +169,8 @@ final class OSCController: ObservableObject {
             oscLog("rejected malformed or oversized OSC datagram (\(data.count) bytes)")
             return
         }
-        let limits = (pan: min(1, max(0, UserDefaults.standard.double(forKey: "rs3.websocket.panLimit"))),
-                      tilt: min(1, max(0, UserDefaults.standard.double(forKey: "rs3.websocket.tiltLimit"))))
+        let limits = (pan: min(1, max(0, UserDefaults.standard.object(forKey: "rs3.websocket.panLimit") as? Double ?? 0.5)),
+                      tilt: min(1, max(0, UserDefaults.standard.object(forKey: "rs3.websocket.tiltLimit") as? Double ?? 0.5)))
         let pan = command.pan ?? 0
         let tilt = command.tilt ?? 0
         let sent = gimbal.setRemotePanTilt(pan: pan, tilt: tilt,
@@ -251,6 +255,8 @@ final class OSCController: ObservableObject {
     private enum Keys {
         static let enabled = "rs3.osc.enabled"
         static let port = "rs3.osc.port"
+        static let panLimit = "rs3.websocket.panLimit"
+        static let tiltLimit = "rs3.websocket.tiltLimit"
         static let allowRemoteHosts = "rs3.osc.allowRemoteHosts"
         static let loggingEnabled = "rs3.osc.loggingEnabled"
     }

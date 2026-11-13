@@ -2,7 +2,6 @@ import SwiftUI
 
 struct PreferencesView: View {
     @EnvironmentObject private var gimbal: GimbalController
-    @EnvironmentObject private var websocket: WebSocketController
     @EnvironmentObject private var osc: OSCController
 
     var body: some View {
@@ -14,38 +13,6 @@ struct PreferencesView: View {
                         .foregroundStyle(.secondary)
                     Spacer()
                     ConnectionBadge()
-                }
-
-                GroupBox("WebSocket bridge") {
-                    VStack(alignment: .leading, spacing: 14) {
-                        Toggle("Enable WebSocket listener", isOn: $websocket.enabled)
-                        portField("Port", value: $websocket.port, placeholder: "81")
-                        Toggle("Require access token", isOn: $websocket.requireAccessToken)
-                        if websocket.requireAccessToken {
-                            HStack(alignment: .top) {
-                                Text("Access token")
-                                Spacer()
-                                Text(websocket.token)
-                                    .font(.system(.caption, design: .monospaced))
-                                    .textSelection(.enabled)
-                                    .frame(maxWidth: 310, alignment: .trailing)
-                            }
-                            Text("Send auth:<token> as the first text message on each connection.")
-                                .font(.callout).foregroundStyle(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                        } else {
-                            Text("Token authentication is disabled. Any client able to reach this port can send motion commands; use only on a trusted network.")
-                                .font(.callout).foregroundStyle(.orange)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                        Toggle("Log WebSocket diagnostics", isOn: $websocket.loggingEnabled)
-                        Text("Diagnostics are written to ~/Library/Logs/RoninStudio-WebSocket.log.")
-                            .font(.callout).foregroundStyle(.secondary)
-                        Text(websocket.status)
-                            .font(.callout)
-                            .foregroundStyle(websocket.isListening ? .green : .secondary)
-                    }
-                    .padding(8)
                 }
 
                 GroupBox("OSC bridge") {
@@ -71,9 +38,9 @@ struct PreferencesView: View {
 
                 GroupBox("Remote motion limits") {
                     VStack(alignment: .leading, spacing: 14) {
-                        limitSlider("Maximum pan command", value: $websocket.panLimit)
-                        limitSlider("Maximum tilt command", value: $websocket.tiltLimit)
-                        Text("These global limits apply to both WebSocket and OSC input. They cap command strength independently on each axis; they are not physical angle or travel stops.")
+                        limitSlider("Maximum pan command", value: $osc.panLimit)
+                        limitSlider("Maximum tilt command", value: $osc.tiltLimit)
+                        Text("These global limits apply to OSC input. They cap command strength independently on each axis; they are not physical angle or travel stops.")
                             .font(.callout).foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
