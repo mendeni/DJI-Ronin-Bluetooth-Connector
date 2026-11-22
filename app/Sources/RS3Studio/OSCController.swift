@@ -6,14 +6,14 @@ import SwiftUI
 /// message whose address is `/pan`, `/tilt`, or `/panTilt` (two arguments).
 @MainActor
 final class OSCController: ObservableObject {
-    @Published var enabled: Bool { didSet { persist(); if !isApplying { applySettings() } } }
-    @Published var port: Int { didSet { persist(); if !isApplying { applySettings() } } }
+    @Published var enabled: Bool { didSet { persist(); applySettings() } }
+    @Published var port: Int { didSet { persist();  applySettings() } }
     @Published var panLimit: Double { didSet { persist() } }
     @Published var tiltLimit: Double { didSet { persist() } }
     @Published var allowRemoteHosts: Bool {
         didSet {
             persist()
-            if !isApplying { applySettings() }
+            applySettings()
             oscLog("remote hosts \(allowRemoteHosts ? "enabled" : "disabled")")
        }
     }
@@ -35,7 +35,6 @@ final class OSCController: ObservableObject {
     private var connectionIdleTimeouts: [UUID: DispatchWorkItem] = [:]
     private static let maxConnections = 32
     private static let connectionIdleTimeout: TimeInterval = 2
-    private var isApplying = false
 
     private var diagnosticLogURL: URL {
         FileManager.default.homeDirectoryForCurrentUser
@@ -225,7 +224,32 @@ final class OSCController: ObservableObject {
 
     private nonisolated static func isLoopback(_ endpoint: NWEndpoint) -> Bool {
         guard case let .hostPort(host, _) = endpoint else { return false }
-        return host == .ipv4(.loopback) || host == .ipv6(.loopback)
+
+        switch host {
+        case .ipv4(let address):
+            let bytes = Array(address.rawValue)
+            // The entire 127.0.0.0/8 range is IPv4 loopback.
+            return bytes.count == 4 && bytes[0] == 127
+
+        case .ipv6(let address):
+            let bytes = Array(address.rawValue)
+            guard bytes.count == 16 else { return false }
+
+            let isIPv6Loopback =
+                bytes.dropLast().allSatisfy { $0 == 0 } && bytes[15] == 1
+
+            // IPv4-mapped IPv6: ::ffff:127.x.x.x
+            let isIPv4MappedLoopback =
+                bytes.prefix(10).allSatisfy { $0 == 0 } &&
+                bytes[10] == 0xff &&
+                bytes[11] == 0xff &&
+                bytes[12] == 127
+
+            return isIPv6Loopback || isIPv4MappedLoopback
+
+        default:
+            return false
+        }
     }
 
     private func handlePacket(_ data: Data) {
@@ -234,20 +258,18 @@ final class OSCController: ObservableObject {
             oscLog("rejected malformed or oversized OSC datagram (\(data.count) bytes)")
             return
         }
-        let limits = (pan: min(1, max(0, UserDefaults.standard.object(forKey: "rs3.osc.panLimit") as? Double ?? 0.5)),
-                      tilt: min(1, max(0, UserDefaults.standard.object(forKey: "rs3.osc.tiltLimit") as? Double ?? 0.5)))
+
         let pan = command.pan ?? 0
         let tilt = command.tilt ?? 0
         let sent = gimbal.setRemotePanTilt(pan: pan, tilt: tilt,
-                                           panLimit: limits.pan, tiltLimit: limits.tilt,
+                                           panLimit: panLimit, tiltLimit: tiltLimit,
                                            diagnostics: loggingEnabled,
                                            source: "osc", diagnosticLogURL: diagnosticLogURL)
-        oscLog("command \(command.address): pan=\(pan), tilt=\(tilt), limits=(pan \(limits.pan), tilt \(limits.tilt)), gimbalConnected=\(sent)")
+        oscLog("command \(command.address): pan=\(pan), tilt=\(tilt), limits=(pan \(panLimit), tilt \(tiltLimit)), gimbalConnected=\(sent)")
         if !sent { oscLog("motion command not sent: gimbal is not connected") }
     }
 
     private func persist() {
-        guard !isApplying else { return }
         defaults.set(enabled, forKey: Keys.enabled)
         defaults.set(port, forKey: Keys.port)
         defaults.set(allowRemoteHosts, forKey: Keys.allowRemoteHosts)
@@ -297,18 +319,18 @@ final class OSCController: ObservableObject {
     }
 
     private nonisolated static func readString(_ bytes: [UInt8], cursor: inout Int) -> String? {
-    guard cursor < bytes.count,
-          let end = bytes[cursor...].firstIndex(of: 0),
-          let value = String(bytes: bytes[cursor..<end], encoding: .utf8) else { return nil }
+        guard cursor < bytes.count,
+              let end = bytes[cursor...].firstIndex(of: 0),
+              let value = String(bytes: bytes[cursor..<end], encoding: .utf8) else { return nil }
         let next = (end + 4) & ~3
-    guard next <= bytes.count else { return nil }
+        guard next <= bytes.count else { return nil }
         cursor = next
         return value
     }
 
     private nonisolated static func readUInt32(_ bytes: [UInt8], cursor: inout Int) -> UInt32? {
-    guard cursor + 4 <= bytes.count else { return nil }
-    let value = bytes[cursor..<cursor + 4].reduce(UInt32(0)) { ($0 << 8) | UInt32($1) }
+        guard cursor + 4 <= bytes.count else { return nil }
+        let value = bytes[cursor..<cursor + 4].reduce(UInt32(0)) { ($0 << 8) | UInt32($1) }
         cursor += 4
         return value
     }
