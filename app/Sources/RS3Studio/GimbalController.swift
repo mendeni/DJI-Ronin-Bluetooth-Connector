@@ -336,9 +336,14 @@ final class GimbalController: ObservableObject {
     private func send(_ s: (yaw: Int16, roll: Int16, pitch: Int16), handle h: GimbalHandle,
                       reportErrors: Bool, source: String, diagnosticLogURL: URL) {
         let (yaw, roll, pitch) = s
-        let result = queue.sync { rs3_speed(h.raw, yaw, roll, pitch) }
-        if reportErrors && result != RS3_OK.rawValue {
-            appendLog("\(source): gimbal speed command failed with status \(result) (yaw=\(yaw), roll=\(roll), pitch=\(pitch))", to: diagnosticLogURL)
+
+        queue.async {
+            let result = rs3_speed(h.raw, yaw, roll, pitch)
+            if reportErrors && result != RS3_OK.rawValue {
+                appendLog(
+                    "\(source): gimbal speed command failed with status \(result) (yaw=\(yaw), roll=\(roll), pitch=\(pitch))", to: diagnosticLogURL
+                )
+            }
         }
     }
 }
