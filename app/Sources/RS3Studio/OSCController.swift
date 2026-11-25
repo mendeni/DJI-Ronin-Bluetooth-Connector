@@ -6,14 +6,14 @@ import SwiftUI
 /// message whose address is `/pan`, `/tilt`, or `/panTilt` (two arguments).
 @MainActor
 final class OSCController: ObservableObject {
-    @Published var enabled: Bool { didSet { persist(); if !isApplying { applySettings() } } }
-    @Published var port: Int { didSet { persist(); if !isApplying { applySettings() } } }
+    @Published var enabled: Bool { didSet { persist(); applySettings() } }
+    @Published var port: Int { didSet { persist(); applySettings() } }
     @Published var panLimit: Double { didSet { persist() } }
     @Published var tiltLimit: Double { didSet { persist() } }
     @Published var allowRemoteHosts: Bool {
         didSet {
             persist()
-            if !isApplying { applySettings() }
+            applySettings()
             oscLog("remote hosts \(allowRemoteHosts ? "enabled" : "disabled")")
        }
     }
@@ -35,7 +35,6 @@ final class OSCController: ObservableObject {
     private var connectionIdleTimeouts: [UUID: DispatchWorkItem] = [:]
     private static let maxConnections = 32
     private static let connectionIdleTimeout: TimeInterval = 2
-    private var isApplying = false
 
     private var diagnosticLogURL: URL {
         FileManager.default.homeDirectoryForCurrentUser
@@ -247,7 +246,6 @@ final class OSCController: ObservableObject {
     }
 
     private func persist() {
-        guard !isApplying else { return }
         defaults.set(enabled, forKey: Keys.enabled)
         defaults.set(port, forKey: Keys.port)
         defaults.set(allowRemoteHosts, forKey: Keys.allowRemoteHosts)
