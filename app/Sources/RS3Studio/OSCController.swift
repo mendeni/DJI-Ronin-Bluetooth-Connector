@@ -258,15 +258,14 @@ final class OSCController: ObservableObject {
             oscLog("rejected malformed or oversized OSC datagram (\(data.count) bytes)")
             return
         }
-        let limits = (pan: min(1, max(0, UserDefaults.standard.object(forKey: "rs3.osc.panLimit") as? Double ?? 0.5)),
-                      tilt: min(1, max(0, UserDefaults.standard.object(forKey: "rs3.osc.tiltLimit") as? Double ?? 0.5)))
+
         let pan = command.pan ?? 0
         let tilt = command.tilt ?? 0
         let sent = gimbal.setRemotePanTilt(pan: pan, tilt: tilt,
-                                           panLimit: limits.pan, tiltLimit: limits.tilt,
+                                           panLimit: panLimit, tiltLimit: tiltLimit,
                                            diagnostics: loggingEnabled,
                                            source: "osc", diagnosticLogURL: diagnosticLogURL)
-        oscLog("command \(command.address): pan=\(pan), tilt=\(tilt), limits=(pan \(limits.pan), tilt \(limits.tilt)), gimbalConnected=\(sent)")
+        oscLog("command \(command.address): pan=\(pan), tilt=\(tilt), limits=(pan \(panLimit), tilt \(tiltLimit)), gimbalConnected=\(sent)")
         if !sent { oscLog("motion command not sent: gimbal is not connected") }
     }
 
