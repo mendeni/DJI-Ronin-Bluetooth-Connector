@@ -224,7 +224,32 @@ final class OSCController: ObservableObject {
 
     private nonisolated static func isLoopback(_ endpoint: NWEndpoint) -> Bool {
         guard case let .hostPort(host, _) = endpoint else { return false }
-        return host == .ipv4(.loopback) || host == .ipv6(.loopback)
+
+        switch host {
+        case .ipv4(let address):
+            let bytes = Array(address.rawValue)
+            // The entire 127.0.0.0/8 range is IPv4 loopback.
+            return bytes.count == 4 && bytes[0] == 127
+
+        case .ipv6(let address):
+            let bytes = Array(address.rawValue)
+            guard bytes.count == 16 else { return false }
+
+            let isIPv6Loopback =
+                bytes.dropLast().allSatisfy { $0 == 0 } && bytes[15] == 1
+
+            // IPv4-mapped IPv6: ::ffff:127.x.x.x
+            let isIPv4MappedLoopback =
+                bytes.prefix(10).allSatisfy { $0 == 0 } &&
+                bytes[10] == 0xff &&
+                bytes[11] == 0xff &&
+                bytes[12] == 127
+
+            return isIPv6Loopback || isIPv4MappedLoopback
+
+        default:
+            return false
+        }
     }
 
     private func handlePacket(_ data: Data) {
