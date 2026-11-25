@@ -319,18 +319,18 @@ final class OSCController: ObservableObject {
     }
 
     private nonisolated static func readString(_ bytes: [UInt8], cursor: inout Int) -> String? {
-    guard cursor < bytes.count,
-          let end = bytes[cursor...].firstIndex(of: 0),
-          let value = String(bytes: bytes[cursor..<end], encoding: .utf8) else { return nil }
+        guard cursor < bytes.count,
+              let end = bytes[cursor...].firstIndex(of: 0),
+              let value = String(bytes: bytes[cursor..<end], encoding: .utf8) else { return nil }
         let next = (end + 4) & ~3
-    guard next <= bytes.count else { return nil }
+        guard next <= bytes.count else { return nil }
         cursor = next
         return value
     }
 
     private nonisolated static func readUInt32(_ bytes: [UInt8], cursor: inout Int) -> UInt32? {
-    guard cursor + 4 <= bytes.count else { return nil }
-    let value = bytes[cursor..<cursor + 4].reduce(UInt32(0)) { ($0 << 8) | UInt32($1) }
+        guard cursor + 4 <= bytes.count else { return nil }
+        let value = bytes[cursor..<cursor + 4].reduce(UInt32(0)) { ($0 << 8) | UInt32($1) }
         cursor += 4
         return value
     }
