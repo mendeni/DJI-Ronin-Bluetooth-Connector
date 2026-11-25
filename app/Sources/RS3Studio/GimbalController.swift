@@ -85,11 +85,15 @@ final class GimbalController: ObservableObject {
     @Published var lockTilt = false
 
     private static let panTiltSpeedDefaultsKey = "rs3.motion.panTiltSpeed"
+    private typealias MotionSpeeds = (yaw: Int16, roll: Int16, pitch: Int16)
 
     private var handle: GimbalHandle?
     private let queue = DispatchQueue(label: "co.rs3studio.gimbal")
     private var holdTimer: Timer?
     private var remoteTimeout: DispatchWorkItem?
+    // Keep UI and OSC requests independent; the sender arbitrates between them.
+    private var uiMotion: (() -> MotionSpeeds?)?
+    private var remoteMotion: (() -> MotionSpeeds?)?
     private var remoteDiagnosticsEnabled = false
     private var remoteSource = "osc"
     private var stick: (x: Double, y: Double) = (0, 0)
@@ -221,10 +225,11 @@ final class GimbalController: ObservableObject {
     func beginMove(_ direction: Direction) {
         log("beginMove \(direction) connected=\(state.isConnected)")
         guard handle != nil, isAllowed(direction) else { return }
-        startSending { [weak self] in
+        uiMotion = { [weak self] in
             guard let self else { return nil }
             return direction.speeds(magnitude: self.speedUnits)
         }
+        refreshSending()
     }
 
     /// Continuous control from the joystick.
@@ -235,9 +240,8 @@ final class GimbalController: ObservableObject {
     func setStick(x: Double, y: Double) {
         guard handle != nil else { return }
         stick = (x, y)
-        if holdTimer == nil {
-            startSending { [weak self] in self?.stickSpeeds() }
-        }
+        uiMotion = { [weak self] in self?.stickSpeeds() }
+        refreshSending()
     }
 
     /// Apply normalized remote pan/tilt values shared by OSC.
@@ -255,7 +259,11 @@ final class GimbalController: ObservableObject {
         if let diagnosticLogURL { remoteDiagnosticLogURL = diagnosticLogURL }
         let boundedPan = min(1, max(-1, pan)) * min(1, max(0, panLimit))
         let boundedTilt = min(1, max(-1, tilt)) * min(1, max(0, tiltLimit))
-        startSending { [weak self] in self?.remotePanTiltSpeeds(pan: boundedPan, tilt: boundedTilt) }
+        remoteMotion = { [weak self] in
+            self?.remotePanTiltSpeeds(pan: boundedPan, tilt: boundedTilt)
+        }
+        refreshSending()
+
         remoteTimeout?.cancel()
         let timeout = DispatchWorkItem { [weak self] in self?.stopRemoteMotion() }
         remoteTimeout = timeout
@@ -273,14 +281,15 @@ final class GimbalController: ObservableObject {
     func stopRemoteMotion() {
         remoteTimeout?.cancel()
         remoteTimeout = nil
+        remoteMotion = nil
         remoteDiagnosticsEnabled = false
-        stick = (0, 0)
-        endMove()
+        refreshSending()
     }
 
     func releaseStick() {
         stick = (0, 0)
-        endMove()
+        uiMotion = nil
+        refreshSending()
     }
 
     private func stickSpeeds() -> (yaw: Int16, roll: Int16, pitch: Int16) {
@@ -291,22 +300,31 @@ final class GimbalController: ObservableObject {
     }
 
     /// Drive the gimbal from a closure sampled on every tick.
-    private func startSending(_ next: @escaping @MainActor () -> (yaw: Int16, roll: Int16, pitch: Int16)?) {
-        holdTimer?.invalidate()
-        let tick: @MainActor () -> Void = { [weak self] in
-            guard let self, let h = self.handle, let s = next() else { return }
-            self.send(s, handle: h, reportErrors: self.remoteDiagnosticsEnabled,
-                      source: self.remoteSource, diagnosticLogURL: self.remoteDiagnosticLogURL)
+    // UI takes priority while active; otherwise send the current OSC request.
+    private func refreshSending() {
+        guard uiMotion != nil || remoteMotion != nil else {
+            holdTimer?.invalidate()
+            holdTimer = nil
+            if let h = handle { queue.async { _ = rs3_stop(h.raw) } }
+            return
         }
-        tick()
-        holdTimer = everyTick(0.1) { tick() }
+
+        sendCurrentMotion()
+        if holdTimer == nil {
+            holdTimer = everyTick(0.1) { [weak self] in self?.sendCurrentMotion() }
+        }
     }
 
+    private func sendCurrentMotion() {
+        guard let h = handle,
+              let speeds = (uiMotion ?? remoteMotion)?() else { return }
+        send(speeds, handle: h, reportErrors: remoteDiagnosticsEnabled,
+             source: remoteSource, diagnosticLogURL: remoteDiagnosticLogURL)
+     }
+
     func endMove() {
-        holdTimer?.invalidate()
-        holdTimer = nil
-        guard let h = handle else { return }
-        queue.async { _ = rs3_stop(h.raw) }
+        uiMotion = nil
+        refreshSending()
     }
 
     func recenter() {
@@ -317,7 +335,9 @@ final class GimbalController: ObservableObject {
     func stop() {
         remoteTimeout?.cancel()
         remoteTimeout = nil
-        endMove()
+        remoteMotion = nil
+        uiMotion = nil
+        refreshSending()
     }
 
     func goTo(_ position: Preset.Position) {
